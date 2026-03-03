@@ -26,10 +26,11 @@ from config import (
 class PineconeEmbedder:
     """Embed text chunks and store them in Pinecone.
 
-    This class loads a local HuggingFace SentenceTransformer model to
-    compute dense vector embeddings for chunk texts and uses the Pinecone
-    client to upsert vectors into an index. It groups operations in
-    batches to avoid memory pressure and prints progress during processing.
+    This class loads a HuggingFace SentenceTransformer model to compute
+    dense vector embeddings for chunk texts and upserts them into a
+    Pinecone index. It expects chunk dictionaries produced by
+    `DocumentChunker` which include `document_id` and `page_number` so
+    that vector metadata preserves document provenance.
     """
 
     def __init__(self) -> None:
@@ -98,11 +99,12 @@ class PineconeEmbedder:
         total_upserted = 0  # track how many vectors we store
         batch_size = 100    # process 100 chunks at a time
 
-        # helper to create a unique id for each chunk
-        def _make_id(ns: str, filepath: str, idx: int) -> str:
-            # sanitize filepath characters that could cause issues
-            safe_path = re.sub(r"[^a-zA-Z0-9_\-\.]+", "_", filepath)
-            return f"{ns}:{safe_path}:{idx}"
+        # helper to create a unique id for each chunk using document id
+        def _make_id(ns: str, document_id: str, idx: int) -> str:
+            # sanitize document id and namespace
+            safe_doc = re.sub(r"[^a-zA-Z0-9_\-\.]+", "_", str(document_id))
+            safe_ns = re.sub(r"[^a-zA-Z0-9_\-\.]+", "_", ns)
+            return f"{safe_ns}:{safe_doc}:{idx}"
 
         # process chunks in batches
         for start in range(0, len(chunks), batch_size):
@@ -125,18 +127,19 @@ class PineconeEmbedder:
             upsert_items = []
             for i, vec in enumerate(vectors):
                 chunk = batch[i]
-                filepath = str(chunk.get("filepath", ""))
+                document_id = str(chunk.get("document_id", ""))
                 chunk_index = int(chunk.get("chunk_index", 0))
-                vid = _make_id(namespace, filepath, chunk_index)
+                vid = _make_id(namespace, document_id, chunk_index)
 
                 # metadata stored alongside each vector in Pinecone
                 metadata = {
                     "filename": str(chunk.get("filename", "")),
-                    "filepath": filepath,
                     "file_type": str(chunk.get("file_type", "")),
-                    "repo_name": str(chunk.get("repo_name", "")),
+                    "page_number": int(chunk.get("page_number", 0)),
                     "chunk_index": chunk_index,
-                    "content": str(chunk.get("content", ""))[:1000],
+                    "document_id": document_id,
+                    "total_pages": int(chunk.get("total_pages", 0)) if chunk.get("total_pages") is not None else None,
+                    "content_preview": str(chunk.get("content", ""))[:1000],
                 }
                 upsert_items.append((vid, vec, metadata))
 
@@ -158,37 +161,22 @@ class PineconeEmbedder:
         print(f"[INFO] Embedding complete. Total vectors stored: {total_upserted}")
         return total_upserted
 
-    def namespace_from_url(self, repo_url: str) -> str:
-        """Convert a GitHub URL into a safe Pinecone namespace string.
-
-        Example: https://github.com/pallets/flask -> 'pallets_flask'
+    def namespace_from_filename(self, filename: str) -> str:
+        """Create a Pinecone namespace string from a filename.
 
         Parameters:
-            repo_url: Full GitHub repository URL
+            filename: The source filename (e.g. 'contract.pdf')
 
         Returns:
-            A sanitized namespace string
+            A sanitized namespace string suitable for Pinecone.
         """
 
         try:
-            # remove the https:// scheme
-            cleaned = re.sub(r"^https?://", "", repo_url).strip().rstrip("/")
-
-            # remove github.com/ prefix
-            if cleaned.startswith("github.com/"):
-                cleaned = cleaned[len("github.com/"):]
-
-            # split into owner and repo parts
-            parts = cleaned.split("/")
-            owner = parts[0] if len(parts) >= 1 else "unknown"
-            repo = parts[1] if len(parts) >= 2 else "unknown"
-
-            # combine and sanitize
-            namespace = f"{owner}_{repo}"
-            namespace = re.sub(r"[^a-zA-Z0-9_]+", "_", namespace)
-            return namespace
-
+            cleaned = str(filename or "").strip()
+            # remove path separators and extensions
+            cleaned = re.sub(r"\.[a-zA-Z0-9]+$", "", cleaned)
+            cleaned = re.sub(r"[^a-zA-Z0-9_]+", "_", cleaned)
+            return cleaned or "default_namespace"
         except Exception as e:
-            print(f"[WARN] Could not parse namespace from URL: {e}")
-            # fallback sanitization
-            return re.sub(r"[^a-zA-Z0-9_]+", "_", repo_url)
+            print(f"[WARN] Could not create namespace from filename: {e}")
+            return "default_namespace"

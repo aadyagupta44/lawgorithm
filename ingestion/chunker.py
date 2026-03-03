@@ -41,32 +41,33 @@ class DocumentChunker:
 		print(f"[INFO] DocumentChunker ready (chunk_size={CHUNK_SIZE}, chunk_overlap={CHUNK_OVERLAP})")
 
 	def chunk_documents(self, documents: List[Dict[str, str]]) -> List[Dict[str, object]]:
-		"""Split each document into chunks and return chunk metadata.
+		"""Split page-level inputs into chunks with document provenance.
 
 		Parameters:
-			documents: A list of file dictionaries with keys `content`,
-					   `filename`, `filepath`, `file_type`, and `repo_name`.
+			pages: A list of page dictionaries produced by `DocumentLoader`.
+			Each page dict must contain: `content`, `filename`, `file_type`,
+			`page_number`, `total_pages`, and `document_id`.
 
 		Returns:
-			A list of chunk dictionaries. Each chunk dictionary contains
-			`content`, `filename`, `filepath`, `file_type`, `repo_name`,
-			and `chunk_index` indicating the chunk's position.
+			A list of chunk dictionaries. Each chunk dictionary contains:
+			`content`, `filename`, `file_type`, `page_number`, `chunk_index`,
+			`document_id`, and `total_pages` for downstream provenance.
 		"""
 
 		chunks: List[Dict[str, object]] = []  # accumulator for all produced chunks
 		total_created = 0  # counter for reporting
 
-		# iterate over provided documents and split their content
-		for doc in documents:
+		# iterate over provided pages and split their content
+		for page in documents:
 			# defensive checks: skip if no content field or empty
-			if not doc or "content" not in doc:
-				print(f"[SKIP] Document missing content or malformed: {doc.get('filepath', 'unknown') if isinstance(doc, dict) else 'invalid'}")
+			if not page or "content" not in page:
+				print(f"[SKIP] Page missing content or malformed: {page.get('filename', 'unknown') if isinstance(page, dict) else 'invalid'}")
 				continue
 
-			content = doc.get("content", "")  # extract content safely
+			content = page.get("content", "")  # extract content safely
 			if not content or not content.strip():
-				# skip empty documents to avoid creating empty chunks
-				print(f"[SKIP] Empty content for file: {doc.get('filepath', 'unknown')}")
+				# skip empty pages to avoid creating empty chunks
+				print(f"[SKIP] Empty content for page: {page.get('filename', 'unknown')}")
 				continue
 
 			# use the splitter to break content into text chunks
@@ -74,18 +75,26 @@ class DocumentChunker:
 				text_chunks = self.splitter.split_text(content)
 			except Exception as e:
 				# handle splitting errors gracefully and continue
-				print(f"[ERROR] Failed to split document '{doc.get('filepath', 'unknown')}': {e}")
+				print(f"[ERROR] Failed to split page for '{page.get('filename', 'unknown')}': {e}")
 				continue
+
+			# extract provenance metadata from the page
+			filename = page.get("filename", "")
+			file_type = page.get("file_type", "")
+			page_number = page.get("page_number", 1)
+			document_id = page.get("document_id")
+			total_pages = page.get("total_pages")
 
 			# create chunk dictionaries with metadata for each produced chunk
 			for idx, chunk_text in enumerate(text_chunks):
 				chunk_dict: Dict[str, object] = {
 					"content": chunk_text,  # the textual content of this chunk
-					"filename": doc.get("filename", ""),  # original filename
-					"filepath": doc.get("filepath", ""),  # original file path in repo
-					"file_type": doc.get("file_type", ""),  # original file extension
-					"repo_name": doc.get("repo_name", ""),  # originating repository name
-					"chunk_index": idx,  # zero-based index of this chunk within the document
+					"filename": filename,  # original filename
+					"file_type": file_type,  # original file type (pdf/text)
+					"page_number": page_number,  # 1-based source page number
+					"chunk_index": idx,  # zero-based index of this chunk within the page
+					"document_id": document_id,  # stable id for the original document
+					"total_pages": total_pages,  # total pages in source document
 				}
 				chunks.append(chunk_dict)  # add to accumulator
 				total_created += 1
