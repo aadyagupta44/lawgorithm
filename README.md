@@ -15,15 +15,15 @@ The key innovation is **visible self-correction**. Every step the AI takes - sea
 
 ##  Key Features
 
-- ** Multi-Document Support** — Upload multiple PDFs or paste raw legal text
-- ** Semantic Search** — Pinecone vector database finds relevant passages instantly
-- ** Self-Correction Loop** — System catches its own mistakes and retries automatically
-- ** Live Reasoning Trace** — Watch every AI step in real time on screen
-- ** Risk Analysis** — Automatically flags dangerous or unfavorable clauses
-- ** Conversational Memory** — Remembers previous questions for context
-- ** Source Citations** — Every answer cites the exact document and page
-- ** Plain English** — Complex legal language explained simply
-- ** 10 Specialist Agents** — Each agent has a specific legal job
+- **Multi-Document Support** — Upload multiple PDFs or paste raw legal text
+- **Semantic Search** — Pinecone vector database finds relevant passages instantly
+- **Self-Correction Loop** — System catches its own mistakes and retries automatically
+- **Live Reasoning Trace** — Watch every AI step in real time on screen
+- **Risk Analysis** — Automatically flags dangerous or unfavorable clauses
+- **Conversational Memory** — Remembers previous questions for context
+- **Source Citations** — Every answer cites the exact document and page
+- **Plain English** — Complex legal language explained simply
+- **10 Specialist Agents** — Each agent has a specific legal job
 
 ---
 
@@ -316,7 +316,8 @@ This makes Lawgorithm particularly suitable for legal work where accuracy is cri
 
 ##  Requirements
 
----
+```
+
 streamlit>=1.32.0
 langchain>=0.2.0
 langchain-groq>=0.1.0
@@ -329,6 +330,7 @@ pymupdf>=1.23.0
 pypdf>=3.0.0
 python-dotenv>=1.0.0
 PyGithub>=2.0.0
+```
 
 ---
 
