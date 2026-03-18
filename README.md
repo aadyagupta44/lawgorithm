@@ -1,32 +1,32 @@
-# ⚖️ Lawgorithm — Intelligent Legal Document Assistant
+#  Lawgorithm - Intelligent Legal Document Assistant
 
 > An AI-powered legal document analysis system built with LangGraph, Groq, and Pinecone. Upload any contract or legal document and get accurate, verified answers with real-time self-correction visualization.
 
----
+----
 
 ## 🎯 What Is Lawgorithm?
 
-Lawgorithm is a **graph-orchestrated agentic self-correcting RAG system** designed for legal document analysis. It allows anyone — not just lawyers — to upload legal documents and ask questions in plain English. The system retrieves relevant passages, generates answers, and then **verifies its own output** before showing it to the user.
+Lawgorithm is a **graph-orchestrated agentic self-correcting RAG system** designed for legal document analysis. It allows anyone - not just lawyers- to upload legal documents and ask questions in plain English. The system retrieves relevant passages, generates answers, and then **verifies its own output** before showing it to the user.
 
-The key innovation is **visible self-correction**. Every step the AI takes — searching documents, grading relevance, checking for hallucinations, rewriting queries — is shown in real time on screen. This makes the system transparent, trustworthy, and genuinely useful for legal work.
-
----
-
-## ✨ Key Features
-
-- **📄 Multi-Document Support** — Upload multiple PDFs or paste raw legal text
-- **🔍 Semantic Search** — Pinecone vector database finds relevant passages instantly
-- **🔄 Self-Correction Loop** — System catches its own mistakes and retries automatically
-- **🧠 Live Reasoning Trace** — Watch every AI step in real time on screen
-- **⚠️ Risk Analysis** — Automatically flags dangerous or unfavorable clauses
-- **💬 Conversational Memory** — Remembers previous questions for context
-- **📚 Source Citations** — Every answer cites the exact document and page
-- **🗣️ Plain English** — Complex legal language explained simply
-- **⚖️ 10 Specialist Agents** — Each agent has a specific legal job
+The key innovation is **visible self-correction**. Every step the AI takes - searching documents, grading relevance, checking for hallucinations, rewriting queries - is shown in real time on screen. This makes the system transparent, trustworthy, and genuinely useful for legal work.
 
 ---
 
-## 🏗️ System Architecture
+##  Key Features
+
+- ** Multi-Document Support** — Upload multiple PDFs or paste raw legal text
+- ** Semantic Search** — Pinecone vector database finds relevant passages instantly
+- ** Self-Correction Loop** — System catches its own mistakes and retries automatically
+- ** Live Reasoning Trace** — Watch every AI step in real time on screen
+- ** Risk Analysis** — Automatically flags dangerous or unfavorable clauses
+- ** Conversational Memory** — Remembers previous questions for context
+- ** Source Citations** — Every answer cites the exact document and page
+- ** Plain English** — Complex legal language explained simply
+- ** 10 Specialist Agents** — Each agent has a specific legal job
+
+---
+
+##  System Architecture
 
 ```
 User Question
@@ -94,7 +94,7 @@ User Question
 
 ---
 
-## 🤖 The Agent System
+##  The Agent System
 
 Lawgorithm uses **10 specialist AI agents**, each with a specific legal job:
 
@@ -116,7 +116,7 @@ Lawgorithm uses **10 specialist AI agents**, each with a specific legal job:
 
 ---
 
-## 📁 Project Structure
+##  Project Structure
 
 ```
 lawgorithm/
@@ -174,7 +174,7 @@ lawgorithm/
 
 ---
 
-## ⚙️ Setup Instructions
+##  Setup Instructions
 
 ### 1. Clone the Repository
 
@@ -248,13 +248,13 @@ Open your browser at `http://localhost:8501`
 
 ---
 
-## 🚀 How to Use
+##  How to Use
 
 ### Step 1 — Upload Documents
 - Click "Upload Legal Documents" in the sidebar
 - Upload one or more PDF files
 - Or paste raw legal text directly
-- Click "⚡ Process Documents"
+- Click " Process Documents"
 
 ### Step 2 — Wait for Processing
 The system will:
@@ -275,16 +275,16 @@ Type any legal question in the chat:
 
 ### Step 4 — Watch the AI Reason
 The **AI Reasoning Trace** panel on the right shows every step:
-- 🔍 Searching documents
-- ⚖️ Grading relevance
-- ✍️ Generating answer
-- ⚠️ Detecting issues
-- 🔄 Self-correcting
-- ✅ Final verification
+-  Searching documents
+-  Grading relevance
+-  Generating answer
+-  Detecting issues
+-  Self-correcting
+-  Final verification
 
 ---
 
-## 📊 Self-Correction System — The Core Innovation
+##  Self-Correction System — The Core Innovation
 
 Most AI systems just answer questions. Lawgorithm **verifies its own answers** through a multi-step correction loop:
 
@@ -303,7 +303,7 @@ This makes Lawgorithm particularly suitable for legal work where accuracy is cri
 
 ---
 
-## 🔑 Environment Variables Reference
+##  Environment Variables Reference
 
 | Variable | Required | Description |
 |----------|----------|-------------|
@@ -313,7 +313,7 @@ This makes Lawgorithm particularly suitable for legal work where accuracy is cri
 
 ---
 
-## 📦 Requirements
+##  Requirements
 
 ```
 streamlit>=1.32.0
@@ -331,7 +331,7 @@ PyGithub>=2.0.0
 
 ---
 
-## 👨‍💻 Built With
+##  Built With
 
 - **LangGraph** — Graph-based agent orchestration
 - **Groq** — Ultra-fast LLM inference
