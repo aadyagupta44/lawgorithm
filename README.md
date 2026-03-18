@@ -2,9 +2,10 @@
 
 > An AI-powered legal document analysis system built with LangGraph, Groq, and Pinecone. Upload any contract or legal document and get accurate, verified answers with real-time self-correction visualization.
 
-----
 
-## 🎯 What Is Lawgorithm?
+---
+
+##  What Is Lawgorithm?
 
 Lawgorithm is a **graph-orchestrated agentic self-correcting RAG system** designed for legal document analysis. It allows anyone - not just lawyers- to upload legal documents and ask questions in plain English. The system retrieves relevant passages, generates answers, and then **verifies its own output** before showing it to the user.
 
@@ -158,7 +159,7 @@ lawgorithm/
 
 ---
 
-## 🛠️ Tech Stack
+##  Tech Stack
 
 | Technology | Role | Why |
 |------------|------|-----|
@@ -315,7 +316,7 @@ This makes Lawgorithm particularly suitable for legal work where accuracy is cri
 
 ##  Requirements
 
-```
+---
 streamlit>=1.32.0
 langchain>=0.2.0
 langchain-groq>=0.1.0
