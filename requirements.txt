@@ -14,7 +14,7 @@ langchain-google-genai>=1.0.0
 
 # PDF reading
 pymupdf>=1.23.0
-pypdf>=3.0.0
+pypdf>=6.10.2
 
 # Word document reading
 python-docx>=1.0.0
