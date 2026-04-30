@@ -57,3 +57,7 @@ TOP_K_RESULTS: int = 5
 
 # Maximum chat history turns to keep for conversational memory
 MAX_CHAT_HISTORY: int = 10
+
+# LLM Provider switch - change this one line to switch models
+# Options: "groq" or "gemini"
+LLM_PROVIDER: str = "groq"

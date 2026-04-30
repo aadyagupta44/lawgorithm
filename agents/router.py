@@ -1,75 +1,89 @@
 """
-Router agent for query relevance classification.
+Router agent for query relevance classification and query enhancement.
 
-This module implements `RouterAgent` which uses the Google Gemini LLM (via
-LangChain's Google GenAI wrapper) to judge whether a user question pertains to
-legal documents or is out of scope. The agent returns a simple string decision:
-'relevant' or 'irrelevant'.
+This module implements `RouterAgent` which uses the LLM to judge whether a user
+question pertains to legal documents. If it is relevant, it uses the HyDE
+(Hypothetical Document Embeddings) technique to enhance the query.
+
+It returns a tuple: (decision, enhanced_query).
 """
 
-from typing import Any
-from langchain_groq import ChatGroq
-from config import GROQ_API_KEY, GROQ_MODEL
+from typing import Tuple
+from utils import get_llm
 
 
 class RouterAgent:
-    """Agent that classifies whether a question should trigger legal document retrieval.
+    """Agent that classifies questions and enhances them using HyDE.
 
-    The agent provides a `route` method that returns 'relevant' or
-    'irrelevant' based on the content of the question.
+    The agent provides a `route` method that returns ('relevant', enhanced_query) 
+    or ('irrelevant', '').
     """
 
     def __init__(self) -> None:
-        """Initialize the ChatGroq client used for routing decisions."""
+        """Initialize the language model client."""
         try:
-            self.llm = ChatGroq(
-                api_key=GROQ_API_KEY,
-                model=GROQ_MODEL
-            )
-            print(f"[INFO] RouterAgent initialized with model {GROQ_MODEL}")
+            self.llm = get_llm()
+            print("[INFO] RouterAgent initialized with dynamic LLM provider")
         except Exception as e:
             self.llm = None  # type: ignore[assignment]
             print(f"[ERROR] Failed to initialize RouterAgent LLM: {e}")
 
-    def route(self, question: str) -> str:
-        """Decide if `question` is relevant to legal documents.
+    def route(self, question: str) -> Tuple[str, str]:
+        """Decide if `question` is relevant, and if so, enhance it via HyDE.
 
         Parameters:
             question: The user's original question string.
 
         Returns:
-            'relevant' if the question is about legal documents, contracts, 
-            or legal matters; otherwise 'irrelevant'.
+            Tuple of (decision, enhanced_query):
+            - decision: 'relevant' or 'irrelevant'
+            - enhanced_query: The query optionally appended with a hypothetical document.
         """
-        # default to 'relevant' in case of any errors - legal queries should be answered
-        default_decision = "relevant"
-
         if not self.llm:
-            print("[WARN] Router LLM not available — defaulting to 'relevant'")
-            return default_decision
+            print("[WARN] Router LLM not available — defaulting to 'relevant' and original query")
+            return "relevant", question
 
-        # system prompt instructing the model on its role for legal document routing
-        system_prompt = (
+        # 1. Classification
+        classification_prompt = (
             "You are a router that classifies whether a user's question pertains to legal documents. "
-            "Legal documents include contracts, agreements, legal clauses, terms of service, "
-            "employment agreements, NDAs, leases, and any other legal or contract-related content. "
-            "Respond only with the single word 'relevant' if the question is about legal matters, "
-            "contracts, legal clauses, terms, obligations, rights, or legal document analysis. "
-            "Otherwise respond only with 'irrelevant'."
+            "Legal documents include contracts, agreements, clauses, terms of service, "
+            "employment agreements, NDAs, leases, and any other legal content. "
+            "Respond ONLY with 'relevant' if it pertains to legal matters. Respond ONLY with 'irrelevant' otherwise."
         )
 
         try:
-            # call the model with a simple chat-style invocation
             response = self.llm.invoke([
-                {"role": "system", "content": system_prompt},
+                {"role": "system", "content": classification_prompt},
                 {"role": "user", "content": question}
             ])
-            # normalize model response to a simple decision
-            text = str(response.content).strip().lower()
-            if "relevant" in text:
-                return "relevant"
-            else:
-                return "irrelevant"
+            decision = str(response.content).strip().lower()
+            if "irrelevant" in decision:
+                return "irrelevant", ""
+            if "relevant" not in decision:
+                return "irrelevant", ""
         except Exception as e:
-            print(f"[ERROR] RouterAgent failed to classify question: {e}")
-            return default_decision
+            print(f"[ERROR] Router classification failed: {e}")
+            return "relevant", question
+
+        # 2. HyDE Enhancement (if relevant)
+        hyde_prompt = (
+            "You are a legal document expert. Given a legal question, generate a brief hypothetical "
+            "legal document or clause that would directly answer the question. The document should be "
+            "realistic and contain key legal terms. Keep it concise (100-150 words) and relevant.\n\n"
+            "Output ONLY the hypothetical document text, with no extra explanation."
+        )
+
+        try:
+            hyde_response = self.llm.invoke([
+                {"role": "system", "content": hyde_prompt},
+                {"role": "user", "content": question}
+            ])
+            hypothetical_doc = str(hyde_response.content).strip()
+            
+            enhanced_query = f"{question}\n\nExample document:\n{hypothetical_doc}"
+            print(f"[INFO] Router identified query as relevant and generated HyDE enhancement.")
+            return "relevant", enhanced_query
+            
+        except Exception as e:
+            print(f"[WARN] HyDE enhancement failed: {e}")
+            return "relevant", question

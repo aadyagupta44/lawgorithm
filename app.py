@@ -89,26 +89,30 @@ custom_css = """
     .chat-bubble-user {
         background: linear-gradient(135deg, #c9a84c 0%, #d4b960 100%);
         color: #0a0a0f;
-        padding: 1rem 1.5rem;
+        padding: 1.25rem 1.75rem;
         border-radius: 16px;
         margin: 0.75rem 0;
         margin-left: auto;
         width: fit-content;
-        max-width: 75%;
+        max-width: 80%;
         box-shadow: 0 4px 12px rgba(201, 168, 76, 0.2);
         font-weight: 500;
+        font-size: 1.1rem;
+        line-height: 1.5;
     }
     .chat-bubble-assistant {
         background-color: #1a1a2e;
         color: #e8e8e8;
-        padding: 1rem 1.5rem;
+        padding: 1.25rem 1.75rem;
         border-radius: 16px;
         border-left: 4px solid #c9a84c;
         margin: 0.75rem 0;
         margin-right: auto;
         width: fit-content;
-        max-width: 95%;
+        max-width: 90%;
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        font-size: 1.1rem;
+        line-height: 1.6;
     }
     .badge-high-risk {
         background-color: #ef4444;
@@ -319,6 +323,20 @@ with st.sidebar:
 
     st.markdown("<div class='gold-divider'></div>", unsafe_allow_html=True)
 
+    # Advanced settings
+    st.markdown("### ⚙️ Settings")
+    confidence_threshold = st.slider(
+        "Confidence Threshold", 
+        min_value=0.0, 
+        max_value=1.0, 
+        value=0.7, 
+        step=0.05,
+        help="Higher values force more rigorous evaluation and retry loops."
+    )
+    st.session_state.confidence_threshold = confidence_threshold
+
+    st.markdown("<div class='gold-divider'></div>", unsafe_allow_html=True)
+
     # Document upload section
     st.markdown("### 📂 Upload Legal Documents")
 
@@ -357,9 +375,11 @@ with st.sidebar:
                 loader = DocumentLoader()
                 loaded_docs = []
 
+                my_bar = st.progress(0, text="Initializing processing...")
+
                 # Step 1: Load PDF files using NamedTemporaryFile
                 if uploaded_files:
-                    st.info(f"📥 Loading {len(uploaded_files)} PDF file(s)...")
+                    my_bar.progress(10, text=f"📥 Loading {len(uploaded_files)} PDF file(s)...")
                     for uploaded_file in uploaded_files:
                         # Write to temp file then load — avoids temp dir closing too early
                         with tempfile.NamedTemporaryFile(
@@ -370,7 +390,6 @@ with st.sidebar:
                         try:
                             docs = loader.load_pdf(tmp_path)
                             loaded_docs.extend(docs)
-                            st.success(f"✅ Loaded {uploaded_file.name} ({len(docs)} pages)")
                         except Exception as e:
                             st.warning(f"⚠️ Could not load {uploaded_file.name}: {str(e)}")
                         finally:
@@ -379,11 +398,10 @@ with st.sidebar:
 
                 # Step 2: Load pasted text if provided
                 if pasted_text:
-                    st.info("📥 Loading pasted text...")
+                    my_bar.progress(30, text="📥 Loading pasted text...")
                     name = doc_name or "Pasted Document"
                     text_docs = loader.load_text(pasted_text, name)
                     loaded_docs.extend(text_docs)
-                    st.success(f"✅ Loaded text document: {name}")
 
                 if not loaded_docs:
                     st.error("❌ No documents could be loaded")
@@ -391,13 +409,12 @@ with st.sidebar:
                     st.stop()
 
                 # Step 3: Chunk documents
-                st.info("✂️ Creating chunks...")
+                my_bar.progress(50, text="✂️ Creating chunks...")
                 chunker = DocumentChunker()
                 chunks = chunker.chunk_documents(loaded_docs)
-                st.success(f"✅ Created {len(chunks)} chunks")
 
                 # Step 4: Embed and store in Pinecone
-                st.info("🔮 Generating embeddings and storing...")
+                my_bar.progress(70, text="🔮 Generating embeddings and storing...")
                 embedder = PineconeEmbedder()
 
                 # Create namespace from first document name or timestamp
@@ -408,7 +425,6 @@ with st.sidebar:
                 namespace = embedder.namespace_from_filename(first_name)
 
                 stored_count = embedder.embed_and_store(chunks, namespace)
-                st.success(f"✅ Stored {stored_count} vectors in Pinecone")
 
                 # Update session state with processed document info
                 st.session_state.current_namespace = namespace
@@ -429,10 +445,7 @@ with st.sidebar:
                         "chunks": len(chunks),
                     })
 
-                st.success(
-                    f"✨ Done! {len(loaded_docs)} pages → "
-                    f"{len(chunks)} chunks → {stored_count} vectors"
-                )
+                my_bar.progress(100, text=f"✨ Done! {len(loaded_docs)} pages → {len(chunks)} chunks → {stored_count} vectors")
 
                 st.session_state.is_processing = False
                 st.rerun()
@@ -563,59 +576,23 @@ else:
                 unsafe_allow_html=True,
             )
 
-        # Risk summary card if results available
-        if st.session_state.last_result:
-            risk_flags = st.session_state.last_result.get("risk_flags", [])
-            if risk_flags:
-                # risk_flags are plain strings — check for keywords
-                high = sum(1 for r in risk_flags if "high" in str(r).lower())
-                medium = sum(1 for r in risk_flags if "medium" in str(r).lower())
-                low = sum(1 for r in risk_flags if "low" in str(r).lower())
-
-                st.markdown(
-                    f"""
-                    <div class='card'>
-                        <div class='card-title'>⚠️ Risk Analysis</div>
-                        <span class='badge-high-risk'>🔴 High: {high}</span>
-                        <span class='badge-medium-risk'>🟡 Med: {medium}</span>
-                        <span class='badge-low-risk'>🟢 Low: {low}</span>
-                        <div style='margin-top:1rem; font-size:0.85rem; color:#8a8a8a;'>
-                    """,
-                    unsafe_allow_html=True,
-                )
-                for flag in risk_flags[:5]:
-                    st.markdown(f"• {flag}", unsafe_allow_html=False)
-                st.markdown("</div></div>", unsafe_allow_html=True)
-
         # Quick action buttons
         st.markdown("### ⚡ Quick Actions")
 
         if st.button("📋 Summarize Document", use_container_width=True):
-            st.session_state.messages.append({
-                "role": "user",
-                "content": "Please provide a comprehensive summary of this document.",
-            })
+            st.session_state.pending_action = "Please provide a comprehensive summary of this document."
             st.rerun()
 
         if st.button("🔍 Extract Deadlines", use_container_width=True):
-            st.session_state.messages.append({
-                "role": "user",
-                "content": "Extract all deadlines and important dates from this document.",
-            })
+            st.session_state.pending_action = "Extract all deadlines and important dates from this document."
             st.rerun()
 
         if st.button("⚖️ Analyze Favorability", use_container_width=True):
-            st.session_state.messages.append({
-                "role": "user",
-                "content": "Is this contract favorable to me? What are the main risks?",
-            })
+            st.session_state.pending_action = "Is this contract favorable to me? What are the main risks?"
             st.rerun()
 
         if st.button("🚩 Flag Risky Clauses", use_container_width=True):
-            st.session_state.messages.append({
-                "role": "user",
-                "content": "Flag all risky or unfavorable clauses in this document.",
-            })
+            st.session_state.pending_action = "Flag all risky or unfavorable clauses in this document."
             st.rerun()
 
     # ============================================================
@@ -649,53 +626,39 @@ else:
                     loop_count = message.get("loop_count", 0)
                     risk_flags = message.get("risk_flags", [])
 
+                    score = message.get("confidence_score", None)
+                    relevance = message.get("relevance_score", None)
+
                     # Main answer bubble
                     st.markdown(
                         f"""
-                        <div style='display:flex; justify-content:flex-start; margin-bottom:0.5rem;'>
-                            <div class='chat-bubble-assistant'>{content}
+                        <div style='display:flex; justify-content:flex-start; margin-bottom:0.25rem;'>
+                            <div class='chat-bubble-assistant'>{content}</div>
+                        </div>
                         """,
                         unsafe_allow_html=True,
                     )
 
-                    # Source citations
-                    if source_files:
-                        st.markdown(
-                            "<div style='margin-top:0.75rem; padding-top:0.75rem; "
-                            "border-top:1px solid #2a2a3e;'>"
-                            "<div style='font-size:0.8rem; color:#8a8a8a; margin-bottom:0.5rem;'>"
-                            "📚 Sources:</div>",
-                            unsafe_allow_html=True,
-                        )
-                        for src in source_files:
-                            st.markdown(
-                                f"<span class='source-chip'>📄 {src}</span>",
-                                unsafe_allow_html=True,
-                            )
-                        st.markdown("</div>", unsafe_allow_html=True)
+                    # Start a div for the metadata beneath the chat bubble
+                    st.markdown("<div style='margin-left: 1rem; margin-bottom: 2rem; display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center;'>", unsafe_allow_html=True)
 
-                    # Risk flag badges
-                    if risk_flags:
-                        st.markdown(
-                            "<div style='margin-top:0.75rem;'>",
-                            unsafe_allow_html=True,
-                        )
-                        for flag in risk_flags:
-                            level = (
-                                "high" if "high" in str(flag).lower()
-                                else "medium" if "medium" in str(flag).lower()
-                                else "low"
-                            )
-                            badge = {
-                                "high": "badge-high-risk",
-                                "medium": "badge-medium-risk",
-                                "low": "badge-low-risk",
-                            }[level]
-                            st.markdown(
-                                f"<span class='{badge}'>⚠️ {flag}</span>",
-                                unsafe_allow_html=True,
-                            )
-                        st.markdown("</div>", unsafe_allow_html=True)
+                    # Source citations and subtle score
+                    src_text = ", ".join(source_files) if source_files else "None"
+                    
+                    score_text = ""
+                    if score is not None and relevance is not None:
+                        score_text = f"<span style='color:#8a8a8a; margin-left: 0.5rem;'>• Confidence: {score * 100:.0f}%</span>"
+
+                    st.markdown(
+                        f"""
+                        <div style='display:inline-flex; align-items: center; font-size:0.8rem; color:#8a8a8a; 
+                                    background-color:#1a1a2e; padding:0.4rem 1rem; border-radius:20px; border:1px solid #2a2a3e;'>
+                            📚 Source Docs: <span style='color:#c9a84c; margin-left: 0.3rem;'>{src_text}</span>
+                            {score_text}
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
 
                     # Self-correction badge
                     if loop_count and loop_count > 0:
@@ -707,13 +670,18 @@ else:
                             unsafe_allow_html=True,
                         )
 
-                    st.markdown("</div></div>", unsafe_allow_html=True)
+                    st.markdown("</div>", unsafe_allow_html=True)
 
         # Chat input at the bottom
-        user_question = st.chat_input(
+        chat_input_val = st.chat_input(
             placeholder="Ask anything about your legal documents...",
             disabled=st.session_state.is_processing,
         )
+
+        user_question = chat_input_val
+        if st.session_state.get("pending_action"):
+            user_question = st.session_state.pending_action
+            st.session_state.pending_action = None
 
         # ============================================================
         # SECTION 6: HANDLE CHAT INPUT
@@ -735,6 +703,7 @@ else:
                         question=user_question,
                         namespace=st.session_state.current_namespace,
                         chat_history=st.session_state.chat_history,
+                        confidence_threshold=st.session_state.confidence_threshold,
                     )
 
                 # Extract all results from graph output
@@ -742,7 +711,6 @@ else:
                 source_files = result.get("source_files", [])
                 source_pages = result.get("source_pages", [])
                 loop_count = result.get("loop_count", 0)
-                risk_flags = result.get("risk_flags", [])
                 correction_log = result.get("correction_log", [])
 
                 # Fallback if generation is empty
@@ -769,7 +737,8 @@ else:
                     "source_files": source_files,
                     "source_pages": source_pages,
                     "loop_count": loop_count,
-                    "risk_flags": risk_flags,
+                    "confidence_score": result.get("confidence_score", None),
+                    "relevance_score": result.get("relevance_score", None),
                 })
 
                 st.session_state.is_processing = False
@@ -784,98 +753,46 @@ else:
     # ============================================================
 
     with right_col:
-        st.markdown("### 🧠 AI Reasoning Trace")
+        st.markdown("### 📊 Backend Metrics")
         st.markdown(
             "<div style='font-size:0.8rem; color:#8a8a8a; margin-bottom:1rem;'>"
-            "Watch the self-correction in real time"
+            "Confidence scores and validation metrics"
             "</div>",
             unsafe_allow_html=True,
         )
 
-        if not st.session_state.correction_logs:
+        if not st.session_state.last_result:
             # Placeholder before first query
             st.markdown(
                 """
                 <div style='color:#8a8a8a; font-size:0.85rem; padding:1rem;
                 background-color:#1a1a2e; border-radius:8px; margin-top:1rem;'>
-                    This panel shows every step the AI takes — searches,
-                    verifications, self-corrections, and final validation.
-                    Ask a question to see it in action.
+                    This panel displays the underlying metrics and scores for the AI's generated response. Ask a question to see the results.
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
         else:
-            # Display each step in the correction log
-            for i, step in enumerate(st.session_state.correction_logs, 1):
-                # correction_log items are plain strings
-                description = str(step)
-
-                # Pick icon based on keywords in the step description
-                if "search" in description.lower() or "retriev" in description.lower():
-                    icon = "🔍"
-                elif "generat" in description.lower():
-                    icon = "✍️"
-                elif "rewrite" in description.lower() or "retry" in description.lower():
-                    icon = "🔄"
-                elif "hallucin" in description.lower():
-                    icon = "⚠️"
-                elif "grade" in description.lower() or "check" in description.lower():
-                    icon = "⚖️"
-                elif "memory" in description.lower() or "accept" in description.lower():
-                    icon = "✅"
-                elif "error" in description.lower():
-                    icon = "❌"
-                else:
-                    icon = "📝"
-
-                # Pick step class based on keywords
-                if "rewrite" in description.lower() or "retry" in description.lower():
-                    step_class = "trace-step trace-step-warning"
-                elif "error" in description.lower() or "hallucin" in description.lower():
-                    step_class = "trace-step trace-step-error"
-                elif "accept" in description.lower() or "memory" in description.lower():
-                    step_class = "trace-step trace-step-success"
-                else:
-                    step_class = "trace-step"
-
-                st.markdown(
-                    f"""
-                    <div class='{step_class}'>
-                        <span class='trace-step-badge'>{i}</span>
-                        {icon} {description}
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-
-            # Summary stats after trace
-            st.markdown(
-                "<div style='margin-top:1.5rem; font-size:0.8rem; "
-                "color:#c9a84c; font-weight:700;'>📊 Query Summary</div>",
-                unsafe_allow_html=True,
-            )
-
             if st.session_state.last_result:
-                retrieval_score = st.session_state.last_result.get("retrieval_score", "—")
-                hallucination_score = st.session_state.last_result.get("hallucination_score", "—")
-                answer_score = st.session_state.last_result.get("answer_score", "—")
+                confidence_score = st.session_state.last_result.get("confidence_score", 0.0)
+                hallucination_score = st.session_state.last_result.get("hallucination_score", 0.0)
+                relevance_score = st.session_state.last_result.get("relevance_score", 0.0)
                 loop_count = st.session_state.last_result.get("loop_count", 0)
 
                 col1, col2 = st.columns(2)
                 with col1:
                     st.markdown(
                         f"<div class='stat-card'>"
-                        f"<div class='stat-value'>{retrieval_score}</div>"
-                        f"<div class='stat-label'>Retrieval</div>"
+                        f"<div class='stat-value'>{int(confidence_score * 100)}%</div>"
+                        f"<div class='stat-label'>Confidence</div>"
                         f"</div>",
                         unsafe_allow_html=True,
                     )
                 with col2:
                     st.markdown(
                         f"<div class='stat-card'>"
-                        f"<div class='stat-value'>{hallucination_score}</div>"
-                        f"<div class='stat-label'>Hallucination</div>"
+                        f"<div class='stat-value'>{int(hallucination_score * 100)}%</div>"
+                        f"<div class='stat-label'>Grounding</div>"
                         f"</div>",
                         unsafe_allow_html=True,
                     )
@@ -884,8 +801,8 @@ else:
                 with col3:
                     st.markdown(
                         f"<div class='stat-card'>"
-                        f"<div class='stat-value'>{answer_score}</div>"
-                        f"<div class='stat-label'>Quality</div>"
+                        f"<div class='stat-value'>{int(relevance_score * 100)}%</div>"
+                        f"<div class='stat-label'>Relevance</div>"
                         f"</div>",
                         unsafe_allow_html=True,
                     )
@@ -919,7 +836,7 @@ st.markdown(
     """
     <div class='footer'>
         ⚖️ Lawgorithm v1.0<br>
-        Powered by LangGraph • Groq • Pinecone<br><br>
+        Powered by LangGraph • Gemini• Pinecone<br><br>
         <span style='font-size:0.8rem; color:#8a8a8a;'>
             For educational purposes only.
             Not a substitute for professional legal advice.

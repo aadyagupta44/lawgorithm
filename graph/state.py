@@ -41,6 +41,12 @@ class GraphState(TypedDict, total=False):
 	# Original question asked by the user about legal documents
 	question: str
 
+	# Decision from router: 'relevant' or 'irrelevant'
+	is_relevant: str
+
+	# Enhanced query after HyDE processing
+	enhanced_query: str
+
 	# Previous Q&A pairs for conversation memory - each dict has "question" and "answer" keys
 	chat_history: List[Dict[str, str]]
 
@@ -53,14 +59,26 @@ class GraphState(TypedDict, total=False):
 	# Counter tracking how many times the query has been rewritten (self-correction attempts)
 	loop_count: int
 
-	# Relevance judgment from RelevanceGrader: 'relevant' or 'irrelevant'
-	retrieval_score: str
+	# Overall confidence score (0.0 to 1.0)
+	confidence_score: float
 
-	# Hallucination judgment from HallucinationGrader: 'grounded' or 'hallucinated'
-	hallucination_score: str
+	# Hallucination/Grounding score (0.0 to 1.0)
+	hallucination_score: float
 
-	# Answer quality judgment from AnswerGrader: 'useful' or 'not useful'
-	answer_score: str
+	# Relevance judgment score (0.0 to 1.0)
+	relevance_score: float
+
+	# Evaluator's reasoning text
+	evaluation_reasoning: str
+
+	# Threshold for confidence
+	confidence_threshold: float
+
+	# Previous failed generation for the retry loop
+	previous_failed_answer: str
+
+	# Feedback reason from previous failure
+	previous_failure_reason: str
 
 	# Pinecone namespace string for vector database search scope
 	namespace: str
