@@ -1,4 +1,4 @@
-# ⚖️ Lawgorithm — Intelligent Legal Document Assistant
+#  Lawgorithm — Intelligent Legal Document Assistant
 
 > A self-correcting, agentic **Retrieval-Augmented Generation (RAG)** system for analyzing legal documents — built on **LangGraph**, **Pinecone**, and pluggable LLM providers (**Groq / Google Gemini**).
 
@@ -28,17 +28,17 @@ Lawgorithm lets you upload contracts, agreements, NDAs, leases, and other legal 
 
 | Feature | Description |
 |---|---|
-| 🧭 **Query Routing** | An LLM-based router classifies each question as `relevant` (legal) or `irrelevant`, short-circuiting out-of-scope queries before any retrieval cost is incurred. |
-| 🔬 **HyDE Query Enhancement** | Relevant queries are expanded with a **Hypothetical Document Embedding** — a synthetic legal clause that answers the question — to improve semantic retrieval recall. |
-| 📚 **Grounded Generation** | Answers are constrained strictly to retrieved document chunks. The model is instructed to explicitly state when an answer is *not* present in the source. |
-| ⚖️ **Automated Evaluation** | Every answer is scored by an evaluator agent on **grounding** (anti-hallucination) and **relevance**, producing a combined confidence score in `[0.0, 1.0]`. |
-| 🔄 **Self-Correction Loop** | If confidence < threshold, the failure reason is fed back into a re-generation step. Up to **3 retry loops** before the best-effort answer is accepted. |
-| 🗂️ **Namespaced Multi-Document Store** | Each document is embedded into its own Pinecone **namespace**, keeping document corpora isolated and queryable independently. |
-| 🔌 **Pluggable LLM Provider** | Switch between **Groq** (`llama-3.3-70b-versatile`) and **Google Gemini** (`gemini-2.0-flash-lite`) by changing a single config line. |
-| 📎 **Source Attribution** | Responses carry the list of source filenames and page numbers used to construct the answer. |
-| 🧠 **Conversational Memory** | Sliding-window chat history (default 10 turns) provides follow-up context across a conversation. |
-| 🖥️ **Two Interfaces** | A rich **Streamlit** web UI and a **FastAPI** REST service with auto-generated Swagger docs. |
-| 📝 **Transparent Trace** | A live "correction log" records every step (routing → retrieval → generation → evaluation → retries) for full observability. |
+|  **Query Routing** | An LLM-based router classifies each question as `relevant` (legal) or `irrelevant`, short-circuiting out-of-scope queries before any retrieval cost is incurred. |
+|  **HyDE Query Enhancement** | Relevant queries are expanded with a **Hypothetical Document Embedding** — a synthetic legal clause that answers the question — to improve semantic retrieval recall. |
+|  **Grounded Generation** | Answers are constrained strictly to retrieved document chunks. The model is instructed to explicitly state when an answer is *not* present in the source. |
+|  **Automated Evaluation** | Every answer is scored by an evaluator agent on **grounding** (anti-hallucination) and **relevance**, producing a combined confidence score in `[0.0, 1.0]`. |
+|  **Self-Correction Loop** | If confidence < threshold, the failure reason is fed back into a re-generation step. Up to **3 retry loops** before the best-effort answer is accepted. |
+|  **Namespaced Multi-Document Store** | Each document is embedded into its own Pinecone **namespace**, keeping document corpora isolated and queryable independently. |
+|  **Pluggable LLM Provider** | Switch between **Groq** (`llama-3.3-70b-versatile`) and **Google Gemini** (`gemini-2.0-flash-lite`) by changing a single config line. |
+|  **Source Attribution** | Responses carry the list of source filenames and page numbers used to construct the answer. |
+|  **Conversational Memory** | Sliding-window chat history (default 10 turns) provides follow-up context across a conversation. |
+|  **Two Interfaces** | A rich **Streamlit** web UI and a **FastAPI** REST service with auto-generated Swagger docs. |
+|  **Transparent Trace** | A live "correction log" records every step (routing → retrieval → generation → evaluation → retries) for full observability. |
 
 ---
 
