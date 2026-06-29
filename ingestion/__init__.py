@@ -1,5 +1,5 @@
 """
-Ingestion package for CodeMind.
+Ingestion package for Lawgorithm.
 
 - This package contains the components used to ingest local documents (PDF/text):
 - `DocumentLoader` reads PDFs and text into page-level dictionaries

@@ -1,757 +1,386 @@
-<<<<<<< HEAD
-# Capstone RAG - Intelligent Legal Document Assistant
+# ⚖️ Lawgorithm — Intelligent Legal Document Assistant
 
-Professional-grade RAG (Retrieval-Augmented Generation) system for legal document analysis using LangGraph, Groq/Gemini LLMs, and Pinecone vector database.
+> A self-correcting, agentic **Retrieval-Augmented Generation (RAG)** system for analyzing legal documents — built on **LangGraph**, **Pinecone**, and pluggable LLM providers (**Groq / Google Gemini**).
 
-## Features
+Lawgorithm lets you upload contracts, agreements, NDAs, leases, and other legal documents, then ask questions in natural language. Answers are grounded strictly in the source material, automatically scored for **hallucination** and **relevance**, and **re-generated** if quality falls below a configurable confidence threshold — all with full source attribution (filename + page number).
 
-✨ **Self-Correcting RAG** - LangGraph workflow automatically retries and improves answers
-🧠 **Multiple LLM Support** - Switch between Groq (fast) and Google Gemini (capable) with one config
-📚 **Legal Document Processing** - Load PDF, text, and Word documents
-🔍 **Vector Search** - Pinecone-powered semantic search with namespaces
-💾 **Chat Memory** - Maintains conversation history across queries
-⚖️ **Risk Analysis** - Identifies potential issues in legal documents
-🚀 **Production Ready** - FastAPI backend + Streamlit UI
-🧪 **Full Test Coverage** - Unit, integration, and API tests
-🤖 **CI/CD Pipeline** - GitHub Actions for automated testing
+---
 
-## Quick Start
+## Table of Contents
 
-### 1. Clone & Setup
+- [Key Features](#key-features)
+- [Architecture](#architecture)
+- [The Self-Correcting Workflow](#the-self-correcting-workflow)
+- [Project Structure](#project-structure)
+- [Tech Stack](#tech-stack)
+- [Getting Started](#getting-started)
+- [Configuration](#configuration)
+- [Usage](#usage)
+- [REST API Reference](#rest-api-reference)
+- [Testing](#testing)
+- [Continuous Integration](#continuous-integration)
+- [Design Notes & Trade-offs](#design-notes--trade-offs)
+- [Roadmap](#roadmap)
 
-```bash
-# Clone repository
-git clone https://github.com/yourusername/capstone-rag.git
-cd capstone-rag
+---
 
-# Create virtual environment
-python -m venv venv
+## Key Features
 
-# Activate virtual environment
-# On Windows:
-venv\Scripts\activate
-# On macOS/Linux:
-source venv/bin/activate
+| Feature | Description |
+|---|---|
+| 🧭 **Query Routing** | An LLM-based router classifies each question as `relevant` (legal) or `irrelevant`, short-circuiting out-of-scope queries before any retrieval cost is incurred. |
+| 🔬 **HyDE Query Enhancement** | Relevant queries are expanded with a **Hypothetical Document Embedding** — a synthetic legal clause that answers the question — to improve semantic retrieval recall. |
+| 📚 **Grounded Generation** | Answers are constrained strictly to retrieved document chunks. The model is instructed to explicitly state when an answer is *not* present in the source. |
+| ⚖️ **Automated Evaluation** | Every answer is scored by an evaluator agent on **grounding** (anti-hallucination) and **relevance**, producing a combined confidence score in `[0.0, 1.0]`. |
+| 🔄 **Self-Correction Loop** | If confidence < threshold, the failure reason is fed back into a re-generation step. Up to **3 retry loops** before the best-effort answer is accepted. |
+| 🗂️ **Namespaced Multi-Document Store** | Each document is embedded into its own Pinecone **namespace**, keeping document corpora isolated and queryable independently. |
+| 🔌 **Pluggable LLM Provider** | Switch between **Groq** (`llama-3.3-70b-versatile`) and **Google Gemini** (`gemini-2.0-flash-lite`) by changing a single config line. |
+| 📎 **Source Attribution** | Responses carry the list of source filenames and page numbers used to construct the answer. |
+| 🧠 **Conversational Memory** | Sliding-window chat history (default 10 turns) provides follow-up context across a conversation. |
+| 🖥️ **Two Interfaces** | A rich **Streamlit** web UI and a **FastAPI** REST service with auto-generated Swagger docs. |
+| 📝 **Transparent Trace** | A live "correction log" records every step (routing → retrieval → generation → evaluation → retries) for full observability. |
 
-# Install dependencies
-pip install -r requirements.txt
+---
+
+## Architecture
+
+Lawgorithm is composed of three cooperating layers: an **ingestion pipeline**, an **agentic LangGraph workflow**, and **presentation interfaces**.
+
+```
+                          ┌──────────────────────────────────────────────┐
+                          │                INTERFACES                     │
+                          │   Streamlit UI (app.py)   FastAPI (api.py)    │
+                          └───────────────┬──────────────────┬───────────┘
+                                          │                  │
+              ┌───────────────────────────┘                  └──────────────────────────┐
+              ▼                                                                           ▼
+ ┌────────────────────────────┐                                       ┌─────────────────────────────────┐
+ │     INGESTION PIPELINE      │                                       │      LANGGRAPH WORKFLOW           │
+ │                             │                                       │        (graph/)                  │
+ │  DocumentLoader  (PDF/text) │                                       │                                  │
+ │        │                    │                                       │   router_node ──┬─► retrieve     │
+ │        ▼                    │      embeddings + metadata            │       │         │      │         │
+ │  DocumentChunker            │ ───────────────────────────────────► │  (out of scope) │      ▼         │
+ │  (1000 chars / 200 overlap) │                                       │       ▼         │   generate     │
+ │        │                    │                                       │  handle_out_of  │      │         │
+ │        ▼                    │                                       │    _scope       │      ▼         │
+ │  PineconeEmbedder           │ ◄──────── retrieval (top-k=5) ──────► │                 │  evaluate_node │
+ │  (all-MiniLM-L6-v2, 384-d)  │                                       │                 │      │         │
+ └──────────────┬──────────────┘                                      │       confidence│≥ threshold?    │
+                ▼                                                      │           ┌─────┴─────┐         │
+       ┌──────────────────┐                                           │       (no, <3 loops)  (yes)      │
+       │  Pinecone Index  │                                           │           │           │         │
+       │  (per-doc        │◄──────────────────────────────────────── │       generate    update_memory  │
+       │   namespaces)    │                                           └─────────────────────────────────┘
+       └──────────────────┘
 ```
 
-### 2. Configure Environment
+### Components
 
-Create `.env` file in project root:
+- **Ingestion** (`ingestion/`)
+  - `DocumentLoader` — extracts text page-by-page from PDFs via **PyMuPDF**, handling encrypted files gracefully; also wraps raw pasted text. (`GitHubLoader` is also present, a legacy of the project's origins as a code-RAG system.)
+  - `DocumentChunker` — splits pages into overlapping chunks with LangChain's `RecursiveCharacterTextSplitter` (`CHUNK_SIZE=1000`, `CHUNK_OVERLAP=200`).
+  - `PineconeEmbedder` — encodes chunks with `sentence-transformers/all-MiniLM-L6-v2` (384-d) and upserts to Pinecone in batches of 100, preserving rich provenance metadata (filename, page, chunk index, document id, content preview).
 
-```env
-# LLM Configuration
-LLM_PROVIDER=groq                           # or "gemini"
-GROQ_API_KEY=your_groq_api_key_here
-GEMINI_API_KEY=your_gemini_api_key_here
+- **Agents** (`agents/`)
+  - `RouterAgent` — relevance classification + HyDE query enhancement.
+  - `EvaluateAgent` — grounding/relevance/confidence scoring with regex-parsed structured output and safe fallbacks.
 
-# Pinecone Configuration
-PINECONE_API_KEY=your_pinecone_api_key
-PINECONE_INDEX_NAME=lawgorithm
+- **Graph** (`graph/`)
+  - `state.py` — the strongly-typed `GraphState` `TypedDict` shared across all nodes.
+  - `nodes.py` — node implementations (router, retrieve, generate, evaluate, out-of-scope, memory update).
+  - `edges.py` — conditional routing functions (`route_after_router`, `decide_after_evaluate`).
+  - `workflow.py` — assembles and compiles the `StateGraph`; exposes `build_graph()` and `run_graph()`.
 
-# Optional
-EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
-```
+- **Utilities** (`utils/`)
+  - `llm_factory.py` — single source of truth (`get_llm()`) for instantiating the configured chat model, so every agent uses the same provider.
 
-**Get API Keys:**
-- [Groq API](https://console.groq.com) - Free tier available
-- [Google Gemini](https://aistudio.google.com) - Free API key
-- [Pinecone](https://app.pinecone.io) - Free tier (1M vectors)
+---
 
-### 3. Run Everything
+## The Self-Correcting Workflow
 
-```bash
-# Run tests first
-pytest tests/ -v
+The heart of Lawgorithm is a LangGraph state machine. A single query flows through it as follows:
 
-# Start Streamlit UI
-streamlit run app.py
+1. **`router_node`** — Classifies the question. If irrelevant → `handle_out_of_scope` → `END`. If relevant, generates a HyDE-enhanced query.
+2. **`retrieve`** — Embeds the enhanced query (blended with recent chat context) and runs a top-k similarity search against the document's Pinecone namespace.
+3. **`generate`** — Produces a grounded answer from the retrieved chunks. On a retry, the previous rejected answer and its failure reason are injected into the prompt for targeted correction.
+4. **`evaluate_node`** — Scores the answer for grounding and relevance, computing an overall confidence score.
+5. **`decide_after_evaluate`** (conditional edge):
+   - confidence **≥ threshold** → `update_memory` → `END`
+   - confidence **< threshold** and `loop_count < 3` → back to `generate` (self-correction)
+   - confidence **< threshold** and `loop_count ≥ 3` → accept best effort → `update_memory` → `END`
+6. **`update_memory`** — Appends the Q&A to the sliding-window chat history and carries final scores/sources into the output state.
 
-# Or use FastAPI backend
-python -m uvicorn api:app --reload --port 8000
+The default confidence threshold is **0.7** and the maximum number of regeneration loops is **3** — both configurable per request / in `config.py`.
 
-# Run ingestion pipeline
-python run_ingest.py
-```
+---
 
 ## Project Structure
 
 ```
-capstone-rag/
-├── agents/                      # Intelligent agents
-│   ├── router.py               # Query relevance classifier + HyDE enhancement
-│   ├── evaluate.py             # Answer quality evaluator
-│   └── __init__.py
-├── graph/                       # LangGraph workflow
-│   ├── workflow.py             # Main graph assembly
-│   ├── nodes.py                # Node implementations
-│   ├── edges.py                # Conditional routing logic
-│   ├── state.py                # Graph state schema
-│   └── __init__.py
-├── ingestion/                   # Document processing pipeline
-│   ├── document_loader.py      # Load PDF, text, Word files
-│   ├── chunker.py              # Split documents into chunks
-│   ├── embedder.py             # Vector embeddings + Pinecone storage
-│   ├── github_loader.py        # Load from GitHub repos
-│   └── __init__.py
-├── utils/                       # Utilities
-│   ├── llm_factory.py          # LLM provider switching
-│   ├── helpers.py              # Helper functions
-│   └── __init__.py
-├── tests/                       # Test suite
-│   ├── conftest.py             # Pytest fixtures
-│   ├── unit/                   # Unit tests (fast)
-│   ├── integration/            # Integration tests
-│   └── api/                    # API endpoint tests
-├── .github/
-│   ├── workflows/              # GitHub Actions CI/CD
-│   │   ├── test.yml            # Run tests on push/PR
-│   │   ├── lint.yml            # Code quality checks
-│   │   └── scheduled-tests.yml # Nightly tests
-│   └── GITHUB_ACTIONS_GUIDE.md # Full CI/CD documentation
-├── app.py                       # Streamlit UI
-├── api.py                       # FastAPI backend
-├── config.py                    # Configuration
-├── requirements.txt             # Python dependencies
-├── TESTING.md                   # Testing documentation
-└── README.md                    # This file
-```
-
-## Core Components
-
-### 1. Router Agent (`agents/router.py`)
-- Classifies if query is legal-related
-- Uses HyDE (Hypothetical Document Embeddings) for query enhancement
-- Returns: `(decision: "relevant"/"irrelevant", enhanced_query: str)`
-
-### 2. Ingestion Pipeline (`ingestion/`)
-- **DocumentLoader** - Load PDFs, text, Word docs
-- **DocumentChunker** - Split into overlapping chunks (1000 chars, 200 overlap)
-- **PineconeEmbedder** - Generate embeddings + store in Pinecone
-
-### 3. LangGraph Workflow (`graph/workflow.py`)
-```
-START → router_node → retrieve → generate → evaluate_node → END
-                        ↓
-                   (if irrelevant)
-                        ↓
-                handle_out_of_scope → END
-                
-(if confidence < threshold, retry generate)
-```
-
-### 4. Evaluate Agent (`agents/evaluate.py`)
-- Scores answer on: hallucination, relevance, confidence (0.0-1.0)
-- Extracts reasoning for scores
-- Enables self-correction loop
-
-### 5. FastAPI Backend (`api.py`)
-- `/ingest/text` - Ingest text documents
-- `/ingest/file` - Upload PDF files
-- `/query` - Query documents with chat history
-
-### 6. Streamlit UI (`app.py`)
-- Document ingestion interface
-- Query UI with chat history
-- Real-time reasoning traces
-- Risk analysis display
-
-## Running the Application
-
-### Option 1: Streamlit UI (Recommended)
-```bash
-# Terminal 1: Start Streamlit
-streamlit run app.py
-
-# Streamlit opens at http://localhost:8501
-# Upload documents → Ask questions → Get answers with reasoning
-```
-
-### Option 2: FastAPI Backend
-```bash
-# Terminal 1: Start API server
-python -m uvicorn api:app --reload --port 8000
-
-# Terminal 2: Query the API
-curl -X POST "http://localhost:8000/query" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "question": "What are the main terms?",
-    "namespace": "contract-pdf"
-  }'
-
-# OpenAPI docs at http://localhost:8000/docs
-```
-
-### Option 3: Command Line
-```bash
-# Ingest documents
-python run_ingest.py
-
-# Query programmatically
-python -c "
-from graph import run_graph
-result = run_graph(
-    question='What are the payment terms?',
-    namespace='my-documents'
-)
-print(result['generation'])
-"
-```
-
-## Testing
-
-### Run All Tests
-```bash
-# Quick unit tests only
-pytest tests/unit/ -v
-
-# Full test suite
-pytest tests/ -v
-
-# With coverage report
-pytest tests/ --cov=agents --cov=ingestion --cov=graph --cov-report=html
-```
-
-### Test Coverage
-- **Unit Tests** - Fast, isolated component tests
-- **Integration Tests** - Full workflow testing
-- **API Tests** - Endpoint validation
-
-See `TESTING.md` for detailed testing guide.
-
-## GitHub Actions CI/CD
-
-Automated testing on every push and PR:
-
-1. **test.yml** - Runs tests on Python 3.9, 3.10, 3.11, 3.12
-2. **lint.yml** - Code quality checks (Ruff, Black, isort)
-3. **scheduled-tests.yml** - Nightly test runs
-
-View results in repo **Actions** tab.
-
-See `.github/GITHUB_ACTIONS_GUIDE.md` for full CI/CD documentation.
-
-## Configuration
-
-Edit `config.py` to customize:
-
-```python
-# LLM Provider
-LLM_PROVIDER = "groq"              # Switch to "gemini" for Google
-
-# Chunking
-CHUNK_SIZE = 1000                  # Characters per chunk
-CHUNK_OVERLAP = 200                # Overlap between chunks
-
-# Retrieval
-TOP_K_RESULTS = 5                  # Documents to retrieve
-
-# Self-Correction
-MAX_LOOP_COUNT = 3                 # Max retry attempts
-CONFIDENCE_THRESHOLD = 0.7         # Min acceptable confidence
-
-# Embedding
-EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-PINECONE_DIMENSION = 384
-```
-
-## API Reference
-
-### POST /ingest/text
-Ingest text document
-
-```bash
-curl -X POST "http://localhost:8000/ingest/text" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "text": "Legal document text here...",
-    "document_name": "contract.pdf"
-  }'
-```
-
-**Response:**
-```json
-{
-  "message": "Text ingested successfully.",
-  "namespace": "contract_pdf",
-  "chunks_created": 5,
-  "vectors_stored": 5
-}
-```
-
-### POST /ingest/file
-Upload PDF file
-
-```bash
-curl -X POST "http://localhost:8000/ingest/file" \
-  -F "file=@contract.pdf"
-```
-
-### POST /query
-Query documents
-
-```bash
-curl -X POST "http://localhost:8000/query" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "question": "What are the payment terms?",
-    "namespace": "contract-pdf",
-    "confidence_threshold": 0.7,
-    "chat_history": [
-      {"role": "user", "content": "Previous question"},
-      {"role": "assistant", "content": "Previous answer"}
-    ]
-  }'
-```
-
-**Response:**
-```json
-{
-  "generation": "The payment terms are...",
-  "source_files": ["contract.pdf"],
-  "source_pages": [1, 2],
-  "loop_count": 1,
-  "confidence_score": 0.92,
-  "relevance_score": 0.95,
-  "hallucination_score": 0.88
-}
-```
-
-## Troubleshooting
-
-### API Keys Not Working
-- Check `.env` file exists and is readable
-- Verify API keys are correct (check provider's console)
-- Ensure `python-dotenv` is installed
-
-### Pinecone Index Not Found
-```bash
-# Create index in Pinecone dashboard:
-# Name: lawgorithm
-# Dimension: 384
-# Metric: cosine
-```
-
-### Tests Failing
-```bash
-# Run specific test with full output
-pytest tests/unit/test_agents.py -v -s
-
-# Check imports work
-python -c "from agents.router import RouterAgent; print('OK')"
-```
-
-### Slow Responses
-- Reduce `TOP_K_RESULTS` in config
-- Use Groq instead of Gemini (faster)
-- Check Pinecone connection status
-
-## Development
-
-### Code Style
-```bash
-# Auto-format code
-black .
-isort .
-
-# Check for issues
-ruff check .
-flake8 .
-```
-
-### Adding Tests
-```python
-# tests/unit/test_new_feature.py
-import pytest
-from agents.router import RouterAgent
-
-def test_new_feature(mock_google_genai):
-    """Test description."""
-    agent = RouterAgent()
-    agent.llm = mock_google_genai
-    result = agent.route("test query")
-    assert result[0] == "relevant"
-```
-
-### Contributing
-1. Create feature branch: `git checkout -b feature/my-feature`
-2. Write tests: `pytest tests/`
-3. Run linting: `ruff check .`
-4. Commit: `git commit -m "Add feature"`
-5. Push: `git push origin feature/my-feature`
-6. Open PR on GitHub
-
-## License
-
-[Your License Here] - See LICENSE file
-
-## Support
-
-- 📖 Documentation: See `TESTING.md` and `.github/GITHUB_ACTIONS_GUIDE.md`
-- 🐛 Issues: Open GitHub Issue
-- 💬 Discussions: GitHub Discussions
-- 📧 Email: your-email@example.com
-
-## Roadmap
-
-- [ ] Web UI deployment (Vercel/Heroku)
-- [ ] Multi-language support
-- [ ] Real-time collaboration
-- [ ] Advanced analytics dashboard
-- [ ] Custom fine-tuning for legal domains
-- [ ] Mobile app
-
----
-
-**Built with** 💜 using LangGraph, Groq, and Pinecone
-=======
-#  Lawgorithm - Intelligent Legal Document Assistant
-
-> An AI-powered legal document analysis system built with LangGraph, Groq, and Pinecone. Upload any contract or legal document and get accurate, verified answers with real-time self-correction visualization.
-
-
----
-
-##  What Is Lawgorithm?
-
-Lawgorithm is a **graph-orchestrated agentic self-correcting RAG system** designed for legal document analysis. It allows anyone - not just lawyers- to upload legal documents and ask questions in plain English. The system retrieves relevant passages, generates answers, and then **verifies its own output** before showing it to the user.
-
-The key innovation is **visible self-correction**. Every step the AI takes - searching documents, grading relevance, checking for hallucinations, rewriting queries - is shown in real time on screen. This makes the system transparent, trustworthy, and genuinely useful for legal work.
-
----
-
-##  Key Features
-
-- **Multi-Document Support** — Upload multiple PDFs or paste raw legal text
-- **Semantic Search** — Pinecone vector database finds relevant passages instantly
-- **Self-Correction Loop** — System catches its own mistakes and retries automatically
-- **Live Reasoning Trace** — Watch every AI step in real time on screen
-- **Risk Analysis** — Automatically flags dangerous or unfavorable clauses
-- **Conversational Memory** — Remembers previous questions for context
-- **Source Citations** — Every answer cites the exact document and page
-- **Plain English** — Complex legal language explained simply
-- **10 Specialist Agents** — Each agent has a specific legal job
-
----
-
-##  System Architecture
-
-```
-User Question
-      │
-      ▼
-┌─────────────┐
-│   Router    │ ← Is this a legal question?
-│   Agent     │
-└──────┬──────┘
-       │ relevant
-       ▼
-┌─────────────┐
-│  Retriever  │ ← Search Pinecone vector database
-│    Node     │
-└──────┬──────┘
-       │
-       ▼
-┌─────────────┐
-│  Relevance  │ ← Are these documents relevant?
-│   Grader    │
-└──────┬──────┘
-       │ relevant        │ irrelevant
-       │                 ▼
-       │          ┌─────────────┐
-       │          │   Query     │ ← Rewrite question
-       │          │  Rewriter   │   and try again
-       │          └──────┬──────┘
-       │                 │ (loop back to retriever)
-       ▼
-┌─────────────┐
-│  Generator  │ ← Create answer from documents
-│    Node     │
-└──────┬──────┘
-       │
-       ▼
-┌─────────────────┐
-│ Hallucination   │ ← Is every claim backed by documents?
-│    Grader       │
-└──────┬──────────┘
-       │ grounded        │ hallucinated
-       │                 ▼
-       │          ┌─────────────┐
-       │          │  Generator  │ ← Regenerate answer
-       │          └─────────────┘
-       ▼
-┌─────────────┐
-│   Answer    │ ← Is the answer actually useful?
-│   Grader    │
-└──────┬──────┘
-       │ useful          │ not useful
-       │                 ▼
-       │          ┌─────────────┐
-       │          │   Query     │ ← Rewrite and retry
-       │          │  Rewriter   │
-       │          └─────────────┘
-       ▼
-┌─────────────┐
-│   Memory    │ ← Save Q&A to conversation history
-│  Updater    │
-└──────┬──────┘
-       │
-       ▼
-   Final Answer
-```
-
----
-
-##  The Agent System
-
-Lawgorithm uses **10 specialist AI agents**, each with a specific legal job:
-
-| Agent | File | Purpose |
-|-------|------|---------|
-| RouterAgent | `router.py` | Decides if question is about legal documents |
-| RelevanceGrader | `graders.py` | Checks if retrieved chunks answer the question |
-| HallucinationGrader | `graders.py` | Verifies every claim is backed by documents |
-| AnswerGrader | `graders.py` | Checks if answer is complete and useful |
-| RiskFlagGrader | `graders.py` | Identifies dangerous or unfavorable clauses |
-| QueryRewriter | `rewriter.py` | Rewrites questions for better retrieval |
-| PlainEnglishExplainer | `explainer.py` | Translates legal jargon to simple language |
-| ClauseIdentifierAgent | `clause_identifier.py` | Maps all clauses in a document |
-| ContractSummarizerAgent | `summarizer.py` | Creates executive summaries |
-| ComparisonAgent | `comparison.py` | Compares two documents side by side |
-| DeadlineExtractorAgent | `deadline_extractor.py` | Finds all dates and deadlines |
-| FavorabilityAgent | `favorability.py` | Scores contract from user's perspective |
-| RedlineAgent | `redline.py` | Suggests improvements to bad clauses |
-
----
-
-##  Project Structure
-
-```
 lawgorithm/
-├── .env                          # API keys (never committed)
-├── .gitignore                    # Git ignore rules
-├── requirements.txt              # Python dependencies
-├── config.py                     # Configuration constants
-├── app.py                        # Streamlit UI entry point
-│
-├── ingestion/                    # Document processing pipeline
-│   ├── __init__.py
-│   ├── document_loader.py        # PDF and text loading
-│   ├── chunker.py                # Text splitting
-│   └── embedder.py               # Pinecone vector storage
-│
-├── agents/                       # All AI specialist agents
-│   ├── __init__.py
-│   ├── router.py                 # Question router
-│   ├── graders.py                # All grader agents
-│   ├── rewriter.py               # Query rewriter
-│   ├── explainer.py              # Plain English explainer
-│   ├── clause_identifier.py      # Clause mapper
-│   ├── summarizer.py             # Contract summarizer
-│   ├── comparison.py             # Document comparator
-│   ├── deadline_extractor.py     # Deadline finder
-│   ├── favorability.py           # Favorability scorer
-│   └── redline.py                # Clause improver
-│
-├── graph/                        # LangGraph workflow
-│   ├── __init__.py
-│   ├── state.py                  # GraphState TypedDict
-│   ├── nodes.py                  # All node functions
-│   ├── edges.py                  # Conditional edge logic
-│   └── workflow.py               # Graph assembly
-│
-└── .opencode/                    # OpenCode agent briefs
-    └── agents/                   # Markdown briefs for agents
+├── agents/                 # LLM-backed reasoning agents
+│   ├── router.py           # relevance routing + HyDE enhancement
+│   └── evaluate.py         # grounding / relevance / confidence scoring
+├── graph/                  # LangGraph state machine
+│   ├── state.py            # GraphState TypedDict
+│   ├── nodes.py            # node implementations
+│   ├── edges.py            # conditional routing logic
+│   └── workflow.py         # graph assembly + run_graph()
+├── ingestion/              # document → vector pipeline
+│   ├── document_loader.py  # PDF/text loading (PyMuPDF)
+│   ├── chunker.py          # recursive character chunking
+│   ├── embedder.py         # embeddings + Pinecone upsert
+│   └── github_loader.py    # (legacy) repo file loader
+├── utils/
+│   └── llm_factory.py      # provider-agnostic get_llm()
+├── tests/                  # unit, integration, and API tests
+│   ├── unit/               # agents + ingestion
+│   ├── integration/        # end-to-end workflow
+│   └── api/                # FastAPI endpoint tests
+├── .github/workflows/      # CI: lint, multi-version tests, scheduled runs
+├── app.py                  # Streamlit web application
+├── api.py                  # FastAPI REST service
+├── config.py               # central configuration & model selection
+├── run_ingest.py           # standalone ingestion runner
+└── requirements.txt
 ```
 
 ---
 
-##  Tech Stack
+## Tech Stack
 
-| Technology | Role | Why |
-|------------|------|-----|
-| Python 3.11+ | Language | Modern, type-safe |
-| LangGraph | Graph orchestration | Self-correction loops |
-| LangChain | LLM framework | Agent abstractions |
-| Groq (llama-3.3-70b) | LLM | Fast, free, powerful |
-| Pinecone | Vector database | Production-grade search |
-| sentence-transformers | Embeddings | Free, accurate |
-| PyMuPDF | PDF reading | Fast, reliable |
-| Streamlit | UI | Rapid professional UI |
-| OpenCode | Agent development | AI-assisted coding |
+| Layer | Technology |
+|---|---|
+| **Orchestration** | LangGraph, LangChain |
+| **LLMs** | Groq (`llama-3.3-70b-versatile`), Google Gemini (`gemini-2.0-flash-lite`) |
+| **Embeddings** | `sentence-transformers/all-MiniLM-L6-v2` (384-dimensional) |
+| **Vector DB** | Pinecone (namespaced) |
+| **Document Parsing** | PyMuPDF (`fitz`), pypdf, python-docx |
+| **Web UI** | Streamlit |
+| **API** | FastAPI + Uvicorn (OpenAPI/Swagger) |
+| **Testing** | pytest, pytest-asyncio, pytest-cov, httpx |
+| **Language** | Python 3.10–3.12 |
 
 ---
 
-##  Setup Instructions
+## Getting Started
 
-### 1. Clone the Repository
+### Prerequisites
+
+- Python **3.10+**
+- A **Pinecone** account with an index created (see below)
+- An API key for **Groq** and/or **Google Gemini**
+
+### 1. Clone & install
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/lawgorithm.git
+git clone https://github.com/aadyagupta44/lawgorithm.git
 cd lawgorithm
-```
 
-### 2. Create Virtual Environment
-
-```bash
 python -m venv venv
-
 # Windows
 venv\Scripts\activate
-
-# Mac/Linux
+# macOS / Linux
 source venv/bin/activate
-```
 
-### 3. Install Dependencies
-
-```bash
 pip install -r requirements.txt
 ```
 
-### 4. Get API Keys
+### 2. Create the Pinecone index
 
-You need three free API keys:
+Lawgorithm does **not** auto-create the index — create it in the Pinecone dashboard with settings that match `config.py`:
 
-**Groq API Key:**
-- Go to console.groq.com
-- Sign up and go to API Keys
-- Create new key
-- Free tier: 100,000 tokens/day
+- **Dimension:** `384` (must match the embedding model)
+- **Metric:** `cosine`
+- **Name:** `lawgorithm` (or set `PINECONE_INDEX_NAME`)
 
-**Pinecone API Key:**
-- Go to pinecone.io
-- Create free account
-- Go to API Keys
-- Create index named `lawgorithm` with dimension 384, metric cosine
+### 3. Configure environment
 
-**GitHub Token (optional, for ingesting GitHub repos):**
-- Go to github.com → Settings → Developer Settings
-- Personal Access Tokens → Tokens Classic
-- Generate with `repo` scope
+Create a `.env` file in the project root:
 
-### 5. Create .env File
-
-```bash
-# Windows
-New-Item .env
-notepad .env
-```
-
-Add these lines:
-
-```
-GROQ_API_KEY=your_groq_key_here
-PINECONE_API_KEY=your_pinecone_key_here
+```env
+GROQ_API_KEY=your_groq_key
+GEMINI_API_KEY=your_gemini_key
+PINECONE_API_KEY=your_pinecone_key
 PINECONE_INDEX_NAME=lawgorithm
 ```
 
-### 6. Run the Application
+> Keys are loaded via `python-dotenv` and are never hardcoded. `.env` is gitignored.
+
+---
+
+## Configuration
+
+All tunable behavior lives in [`config.py`](config.py):
+
+| Setting | Default | Purpose |
+|---|---|---|
+| `LLM_PROVIDER` | `"groq"` | Switch the entire app between `"groq"` and `"gemini"` — one line. |
+| `GROQ_MODEL` | `llama-3.3-70b-versatile` | Groq chat model. |
+| `GEMINI_MODEL` | `gemini-2.0-flash-lite` | Gemini chat model. |
+| `EMBEDDING_MODEL` | `all-MiniLM-L6-v2` | Sentence-transformer for embeddings. |
+| `PINECONE_DIMENSION` | `384` | Must match the index and embedding model. |
+| `CHUNK_SIZE` | `1000` | Chunk size in characters. |
+| `CHUNK_OVERLAP` | `200` | Overlap to avoid clauses being split at boundaries. |
+| `TOP_K_RESULTS` | `5` | Chunks retrieved per query. |
+| `MAX_LOOP_COUNT` | `3` | Max self-correction regenerations. |
+| `MAX_CHAT_HISTORY` | `10` | Conversational memory window (turns). |
+
+---
+
+## Usage
+
+### Streamlit Web App
 
 ```bash
 streamlit run app.py
 ```
 
-Open your browser at `http://localhost:8501`
+Then open the local URL (default `http://localhost:8501`). From the UI you can:
 
----
+- Upload PDF documents or paste raw legal text
+- Adjust the confidence threshold and provider settings
+- Ask questions with full conversational context
+- See per-answer confidence/grounding/relevance scores, source files & pages, and the live correction log
+- Use **Quick Actions** (e.g., extract deadlines, summarize) and example prompts
 
-##  How to Use
+### Standalone Ingestion
 
-### Step 1 — Upload Documents
-- Click "Upload Legal Documents" in the sidebar
-- Upload one or more PDF files
-- Or paste raw legal text directly
-- Click " Process Documents"
+`run_ingest.py` demonstrates the end-to-end ingestion pipeline programmatically:
 
-### Step 2 — Wait for Processing
-The system will:
-1. Extract text from PDFs page by page
-2. Split text into overlapping chunks
-3. Generate semantic embeddings
-4. Store vectors in Pinecone
-
-### Step 3 — Ask Questions
-Type any legal question in the chat:
-- "Summarize this contract"
-- "What are my obligations under this agreement?"
-- "Flag any risky or unfavorable clauses"
-- "Explain the termination clause in plain English"
-- "What happens if I want to exit early?"
-- "Extract all important dates and deadlines"
-- "Is this contract favorable to me as an employee?"
-
-### Step 4 — Watch the AI Reason
-The **AI Reasoning Trace** panel on the right shows every step:
--  Searching documents
--  Grading relevance
--  Generating answer
--  Detecting issues
--  Self-correcting
--  Final verification
-
----
-
-##  Self-Correction System — The Core Innovation
-
-Most AI systems just answer questions. Lawgorithm **verifies its own answers** through a multi-step correction loop:
-
-**Loop 1 — Relevance Check**
-After retrieving documents, the system grades each one. If none are relevant, it automatically rewrites the query and searches again.
-
-**Loop 2 — Hallucination Check**
-After generating an answer, the system checks every claim against the source documents. If any claim is not backed by a document, it regenerates.
-
-**Loop 3 — Quality Check**
-After passing hallucination check, the system evaluates if the answer actually addresses the question. If not, it rewrites the query and retries.
-
-Maximum 3 correction attempts. Every attempt is logged and shown on screen.
-
-This makes Lawgorithm particularly suitable for legal work where accuracy is critical.
-
----
-
-##  Environment Variables Reference
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| GROQ_API_KEY | Yes | Groq LLM API key |
-| PINECONE_API_KEY | Yes | Pinecone vector DB key |
-| PINECONE_INDEX_NAME | Yes | Index name (default: lawgorithm) |
-
----
-
-##  Requirements
-
-```
-
-streamlit>=1.32.0
-langchain>=0.2.0
-langchain-groq>=0.1.0
-langchain-google-genai>=1.0.0
-langchain-text-splitters>=0.2.0
-langgraph>=0.1.0
-pinecone>=3.0.0
-sentence-transformers>=2.7.0
-pymupdf>=1.23.0
-pypdf>=3.0.0
-python-dotenv>=1.0.0
-PyGithub>=2.0.0
+```bash
+python run_ingest.py
 ```
 
 ---
 
-##  Built With
+## REST API Reference
 
-- **LangGraph** — Graph-based agent orchestration
-- **Groq** — Ultra-fast LLM inference
-- **Pinecone** — Production vector database
-- **Streamlit** — Professional web UI
-- **OpenCode** — AI-assisted agent development
+Start the API server:
+
+```bash
+uvicorn api:app --reload
+```
+
+Interactive Swagger docs are available at **`http://localhost:8000/docs`**.
+
+### Endpoints
+
+#### `POST /ingest/file` — ingest a PDF
+Multipart upload of a `.pdf`. Returns the generated namespace and counts.
+
+```bash
+curl -X POST http://localhost:8000/ingest/file \
+  -F "file=@/path/to/contract.pdf"
+```
+
+```json
+{
+  "message": "File ingested successfully.",
+  "namespace": "contract",
+  "chunks_created": 42,
+  "vectors_stored": 42
+}
+```
+
+#### `POST /ingest/text` — ingest raw text
+
+```bash
+curl -X POST http://localhost:8000/ingest/text \
+  -H "Content-Type: application/json" \
+  -d '{"text": "This Agreement is made between...", "document_name": "MyDoc"}'
+```
+
+#### `POST /query` — ask a question
+
+```bash
+curl -X POST http://localhost:8000/query \
+  -H "Content-Type: application/json" \
+  -d '{
+        "question": "What is the termination notice period?",
+        "namespace": "contract",
+        "confidence_threshold": 0.7,
+        "chat_history": []
+      }'
+```
+
+```json
+{
+  "generation": "The agreement requires 30 days written notice...",
+  "source_files": ["contract.pdf"],
+  "source_pages": [3, 4],
+  "loop_count": 0,
+  "confidence_score": 0.92,
+  "relevance_score": 0.90,
+  "hallucination_score": 0.95
+}
+```
+
+> **Note:** the `namespace` returned by an ingest call is the handle you pass to `/query`. Namespaces are derived from the (sanitized) document filename.
 
 ---
 
->>>>>>> 08c2714cf11edb433cd8c6ab1821821e134bcace
+## Testing
+
+The suite uses mocked Pinecone and LLM clients (see `tests/conftest.py`), so no live API keys are required to run it.
+
+```bash
+# run everything
+pytest
+
+# with coverage
+pytest --cov=. --cov-report=term-missing
+
+# a single layer
+pytest tests/unit
+pytest tests/integration
+pytest tests/api
+```
+
+Test layout:
+
+- `tests/unit/` — agents and ingestion components
+- `tests/integration/` — end-to-end LangGraph workflow
+- `tests/api/` — FastAPI endpoint behavior
+
+---
+
+## Continuous Integration
+
+GitHub Actions workflows live in `.github/workflows/`:
+
+| Workflow | Purpose |
+|---|---|
+| `python-ci.yml` | Install deps and run the test suite on push/PR (Python 3.10). |
+| `test.yml` | Test matrix across Python **3.10 / 3.11 / 3.12**. |
+| `lint.yml` | Static linting (Python 3.11). |
+| `scheduled-tests.yml` | Periodic scheduled test runs. |
+
+Dependabot (`.github/dependabot.yml`) keeps dependencies current.
+
+---
+
+## Design Notes & Trade-offs
+
+- **Why HyDE?** Short user questions embed poorly against dense legal prose. Generating a hypothetical answering clause and embedding *that* dramatically improves retrieval recall on legal corpora.
+- **Why a separate evaluator + loop?** Legal answers must be grounded. Rather than trusting a single generation, Lawgorithm measures grounding/relevance and feeds concrete failure reasons back into a bounded correction loop — trading a few extra LLM calls for substantially higher answer fidelity.
+- **Why namespaces per document?** Isolation prevents cross-document contamination of retrieval and lets a single shared index serve many independent documents cheaply.
+- **Graceful degradation:** Every external dependency (embedder, Pinecone, LLM, agents) is initialized defensively. If a component is unavailable, the workflow logs the issue and falls back to safe defaults rather than crashing.
+- **Provider abstraction:** The `get_llm()` factory means switching model providers is a one-line change with zero edits to agent code.
+
+> ⚠️ **Disclaimer:** Lawgorithm is an AI assistant for document analysis and is **not a substitute for professional legal advice**. Always consult a qualified attorney for legal decisions.
+
+---
+
+## Roadmap
+
+- Multi-document / cross-namespace querying in a single question
+- Persistent chat sessions and user accounts
+- Streaming responses in both UI and API
+- Configurable index auto-provisioning
+- Re-ranking layer on top of vector retrieval
+
+---
+
+<p align="center"><i>Built with LangGraph, Pinecone, and a healthy distrust of hallucinations.</i></p>
